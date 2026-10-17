@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance</title>
+  <link rel="manifest" href="https://omaredgepro-web.github.io/attendance-system2/manifest.json">
+  <meta name="theme-color" content="#10b981">
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg-color:#661C1E; --card-bg:#CD7A41; --text-color:#661C1E; --subtext-color:#661C1E; --input-bg:#f5f8fc; --border-color:#334155; --primary-color:#661C1E; --shadow:0 10px 25px -5px rgba(0,0,0,0.3); }
+    *{box-sizing:border-box;}
+    body{font-family:'Tajawal',sans-serif;background-color:var(--bg-color);color:var(--text-color);display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;}
+    .card{background:var(--card-bg);padding:35px 30px;border-radius:20px;box-shadow:var(--shadow);width:100%;max-width:420px;border:1px solid var(--border-color);}
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px;}
+    h2{margin:0;font-size:22px;font-weight:700;}
+    .form-group{margin-bottom:20px;text-align:right;}
+    label{display:block;margin-bottom:8px;font-size:14px;font-weight:500;}
+    select,input[type="text"]{width:100%;padding:14px;border-radius:12px;border:1px solid var(--border-color);background-color:var(--input-bg);color:var(--text-color);font-size:15px;font-family:'Tajawal',sans-serif;outline:none;}
+    input[readonly]{cursor:not-allowed;opacity:0.85;font-weight:bold;background-color:#e2e8f0;}
+    .btn-submit,.btn-install{width:100%;padding:15px;margin-top:10px;border-radius:12px;border:none;font-size:16px;font-weight:700;font-family:'Tajawal',sans-serif;cursor:pointer;}
+    .btn-submit{background-color:var(--primary-color);color:white;}
+    .btn-install{background-color:#2563eb;color:white;display:none;margin-bottom:10px;}
+    .btn-submit:disabled{background-color:#94a3b8;cursor:not-allowed;}
+    #status{margin-top:20px;font-size:14px;font-weight:500;text-align:center;min-height:24px;line-height:1.5;}
+    .card .header img{width:45%;border-radius:15px;}
+    .status-success{color:#000;}
+    .status-error{color:#ffd22f;}
+    .status-loading{color:#3b82f6;}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h2>تسجيل الحضور</h2>
+    <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTQWRngBxbivIyvtXpDf5llmZxK6iRZFyp6-_1pO5opOdZV89m5D56OQus&s=10" alt="Logo">
+  </div>
+  <button class="btn-install" id="btnInstall" onclick="installApp()">📱 تثبيت التطبيق على الشاشة الرئيسية</button>
+  <div class="form-group">
+    <label for="employee">اسم الموظف:</label>
+    <select id="employee"><option value="">جاري تحميل الأسماء...</option></select>
+  </div>
+  <div class="form-group">
+    <label for="deviceId">معرّف الهاتف الثابت (Device ID):</label>
+    <input type="text" id="deviceId" readonly placeholder="جاري قراءة معرّف الجهاز...">
+  </div>
+  <div class="form-group">
+    <label for="site">الموقع:</label>
+    <select id="site">
+      <option value="From Site">Site</option>
+      <option value="From Home">Home</option>
+    </select>
+  </div>
+  <button class="btn-submit" id="btnSubmit" onclick="registerAttendance()">تسجيل الحضور الآن</button>
+  <div id="status"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = "https://jqqczvohurvedmnilrzx.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpxcWN6dm9odXJ2ZWRtbmlscnp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjIyNzYsImV4cCI6MjEwNzYzODI3Nn0.45_dPVqrYdn162FAU4HJYWDKshiXkgKkuWBMoMjBWBU";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function getOrCreatePersistentDeviceId() {
+    let devId = localStorage.getItem("permanent_device_id");
+    if (!devId) {
+      devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+      localStorage.setItem("permanent_device_id", devId);
+    }
+    document.getElementById("deviceId").value = devId;
+    return devId;
+  }
+  getOrCreatePersistentDeviceId();
+
+  let deferredPrompt;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); deferredPrompt = e;
+    document.getElementById('btnInstall').style.display = 'block';
+  });
+  function installApp() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((c) => {
+        if (c.outcome === 'accepted') document.getElementById('btnInstall').style.display = 'none';
+        deferredPrompt = null;
+      });
+    }
+  }
+
+  async function fetchEmployees() {
+    const select = document.getElementById("employee");
+    const { data, error } = await sb.from("employees").select("name").order("name");
+    if (error || !data || !data.length) {
+      select.innerHTML = '<option value="">تعذر تحميل الأسماء</option>';
+      return;
+    }
+    select.innerHTML = '<option value="">اختر اسمك من القائمة...</option>';
+    data.forEach(r => {
+      const o = document.createElement("option");
+      o.value = r.name; o.innerText = r.name;
+      select.appendChild(o);
+    });
+  }
+  fetchEmployees();
+
+  function registerAttendance() {
+    const employee = document.getElementById("employee").value;
+    const deviceId = document.getElementById("deviceId").value.trim();
+    const site = document.getElementById("site").value;
+    const statusDiv = document.getElementById("status");
+    const btn = document.getElementById("btnSubmit");
+    if (!employee) { alert("يرجى اختيار اسم الموظف أولاً"); return; }
+
+    btn.disabled = true;
+    statusDiv.className = "status-loading";
+    statusDiv.innerHTML = "⏳ جاري التحقق من الموقع...";
+
+    if (!("geolocation" in navigator)) { alert("المتصفح لا يدعم اللوكيشن"); btn.disabled=false; return; }
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const location = pos.coords.latitude + "," + pos.coords.longitude;
+      statusDiv.innerHTML = "📡 جاري إرسال البيانات...";
+      // Date/Time بيتسكنوا تلقائي في الداتابيز بتوقيت مصر
+      const { error } = await sb.from("attendance_logs").insert({
+        name: employee, site: site, location: location, device_id: deviceId
+      });
+      btn.disabled = false;
+      if (!error) {
+        statusDiv.className = "status-success";
+        statusDiv.innerHTML = "✅ تم تسجيل الحضور بنجاح";
+      } else {
+        statusDiv.className = "status-error";
+        const msg = error.message || "";
+        if (msg.includes("تم تسجيل اليوم بالفعل") || msg.includes("uniq_att_name_date") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+          statusDiv.innerHTML = "⚠️ تم تسجيل اليوم بالفعل";
+        } else {
+          statusDiv.innerHTML = "❌ " + msg;
+        }
+      }
+    }, () => {
+      statusDiv.className = "status-error";
+      statusDiv.innerHTML = "❌ يرجى تفعيل الـ GPS والسماح بالوصول لموقعك!";
+      btn.disabled = false;
+    }, { enableHighAccuracy: true, timeout: 10000 });
+  }
+</script>
+</body>
+</html>
